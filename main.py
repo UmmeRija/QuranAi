@@ -8,7 +8,7 @@ Flutter app yahan se connect karta hai.
 from fastapi import FastAPI, Depends, File, UploadFile, HTTPException, Form
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
-from typing import List
+from typing import List, Optional
 import os
 import uuid
 from datetime import datetime
@@ -84,7 +84,7 @@ def home():
 @app.get("/api/v1/surahs", response_model=List[SurahItem], tags=["Quran Data"])
 def get_surahs(db: Session = Depends(get_db)):
     """
-    Aakhri 10 Surahs ki complete list return karta hai.
+    Aakhri 58 Surahs ki complete list return karta hai.
     Flutter app is se surah selection screen banati hai.
     """
     surahs = db.query(SurahInfo).order_by(SurahInfo.surah_no).all()
@@ -97,16 +97,64 @@ def get_surahs(db: Session = Depends(get_db)):
 def _default_surahs():
     """Fallback: agar surah_info table khali ho."""
     data = [
-        {"surah_no": 105, "name_arabic": "الفيل",     "name_english": "Al-Feel",     "name_urdu": "الفیل",    "total_verses": 5},
-        {"surah_no": 106, "name_arabic": "قريش",      "name_english": "Quraysh",     "name_urdu": "قریش",     "total_verses": 4},
-        {"surah_no": 107, "name_arabic": "الماعون",   "name_english": "Al-Ma'un",    "name_urdu": "الماعون",  "total_verses": 7},
-        {"surah_no": 108, "name_arabic": "الكوثر",    "name_english": "Al-Kawthar",  "name_urdu": "الکوثر",   "total_verses": 3},
-        {"surah_no": 109, "name_arabic": "الكافرون",  "name_english": "Al-Kafirun",  "name_urdu": "الکافرون", "total_verses": 6},
-        {"surah_no": 110, "name_arabic": "النصر",     "name_english": "An-Nasr",     "name_urdu": "النصر",    "total_verses": 3},
-        {"surah_no": 111, "name_arabic": "المسد",     "name_english": "Al-Masad",    "name_urdu": "المسد",    "total_verses": 5},
-        {"surah_no": 112, "name_arabic": "الإخلاص",  "name_english": "Al-Ikhlas",   "name_urdu": "الاخلاص",  "total_verses": 4},
-        {"surah_no": 113, "name_arabic": "الفلق",     "name_english": "Al-Falaq",    "name_urdu": "الفلق",    "total_verses": 5},
-        {"surah_no": 114, "name_arabic": "الناس",     "name_english": "An-Nas",      "name_urdu": "الناس",    "total_verses": 6},
+        {"surah_no": 57,  "name_arabic": "الحديد",      "name_english": "Al-Hadid",      "name_urdu": "الحدید",      "total_verses": 29},
+        {"surah_no": 58,  "name_arabic": "المجادلة",    "name_english": "Al-Mujadila",   "name_urdu": "المجادلہ",    "total_verses": 22},
+        {"surah_no": 59,  "name_arabic": "الحشر",       "name_english": "Al-Hashr",      "name_urdu": "الحشر",       "total_verses": 24},
+        {"surah_no": 60,  "name_arabic": "الممتحنة",    "name_english": "Al-Mumtahina",  "name_urdu": "الممتحنہ",    "total_verses": 13},
+        {"surah_no": 61,  "name_arabic": "الصف",        "name_english": "As-Saf",        "name_urdu": "الصف",        "total_verses": 14},
+        {"surah_no": 62,  "name_arabic": "الجمعة",      "name_english": "Al-Jumu'ah",    "name_urdu": "الجمعہ",      "total_verses": 11},
+        {"surah_no": 63,  "name_arabic": "المنافقون",   "name_english": "Al-Munafiqun",  "name_urdu": "المنافقون",   "total_verses": 11},
+        {"surah_no": 64,  "name_arabic": "التغابن",     "name_english": "At-Taghabun",   "name_urdu": "التغابن",     "total_verses": 18},
+        {"surah_no": 65,  "name_arabic": "الطلاق",      "name_english": "At-Talaq",      "name_urdu": "الطلاق",      "total_verses": 12},
+        {"surah_no": 66,  "name_arabic": "التحريم",     "name_english": "At-Tahrim",     "name_urdu": "التحریم",     "total_verses": 12},
+        {"surah_no": 67,  "name_arabic": "الملك",       "name_english": "Al-Mulk",       "name_urdu": "الملک",       "total_verses": 30},
+        {"surah_no": 68,  "name_arabic": "القلم",       "name_english": "Al-Qalam",      "name_urdu": "القلم",       "total_verses": 52},
+        {"surah_no": 69,  "name_arabic": "الحاقة",      "name_english": "Al-Haqqah",     "name_urdu": "الحاقہ",      "total_verses": 52},
+        {"surah_no": 70,  "name_arabic": "المعارج",     "name_english": "Al-Ma'arij",    "name_urdu": "المعارج",     "total_verses": 44},
+        {"surah_no": 71,  "name_arabic": "نوح",         "name_english": "Nuh",           "name_urdu": "نوح",         "total_verses": 28},
+        {"surah_no": 72,  "name_arabic": "الجن",        "name_english": "Al-Jinn",       "name_urdu": "الجن",        "total_verses": 28},
+        {"surah_no": 73,  "name_arabic": "المزمل",      "name_english": "Al-Muzzammil",  "name_urdu": "المزمل",      "total_verses": 20},
+        {"surah_no": 74,  "name_arabic": "المدثر",      "name_english": "Al-Muddaththir","name_urdu": "المدثر",      "total_verses": 56},
+        {"surah_no": 75,  "name_arabic": "القيامة",     "name_english": "Al-Qiyamah",    "name_urdu": "القیامہ",     "total_verses": 40},
+        {"surah_no": 76,  "name_arabic": "الإنسان",     "name_english": "Al-Insan",      "name_urdu": "الانسان",     "total_verses": 31},
+        {"surah_no": 77,  "name_arabic": "المرسلات",    "name_english": "Al-Mursalat",   "name_urdu": "المرسلات",    "total_verses": 50},
+        {"surah_no": 78,  "name_arabic": "النبأ",       "name_english": "An-Naba",       "name_urdu": "النباء",      "total_verses": 40},
+        {"surah_no": 79,  "name_arabic": "النازعات",    "name_english": "An-Nazi'at",    "name_urdu": "النازعات",    "total_verses": 46},
+        {"surah_no": 80,  "name_arabic": "عبس",         "name_english": "Abasa",         "name_urdu": "عبس",         "total_verses": 42},
+        {"surah_no": 81,  "name_arabic": "التكوير",     "name_english": "At-Takwir",     "name_urdu": "التکویر",     "total_verses": 29},
+        {"surah_no": 82,  "name_arabic": "الانفطار",    "name_english": "Al-Infitar",    "name_urdu": "الانفطار",    "total_verses": 19},
+        {"surah_no": 83,  "name_arabic": "المطففين",    "name_english": "Al-Mutaffifin", "name_urdu": "المطففین",    "total_verses": 36},
+        {"surah_no": 84,  "name_arabic": "الانشقاق",    "name_english": "Al-Inshiqaq",   "name_urdu": "الانشقاق",    "total_verses": 25},
+        {"surah_no": 85,  "name_arabic": "البروج",      "name_english": "Al-Buruj",      "name_urdu": "البروج",      "total_verses": 22},
+        {"surah_no": 86,  "name_arabic": "الطارق",      "name_english": "At-Tariq",      "name_urdu": "الطارق",      "total_verses": 17},
+        {"surah_no": 87,  "name_arabic": "الأعلى",      "name_english": "Al-A'la",       "name_urdu": "الاعلیٰ",     "total_verses": 19},
+        {"surah_no": 88,  "name_arabic": "الغاشية",     "name_english": "Al-Ghashiyah",  "name_urdu": "الغاشیہ",     "total_verses": 26},
+        {"surah_no": 89,  "name_arabic": "الفجر",       "name_english": "Al-Fajr",       "name_urdu": "الفجر",       "total_verses": 30},
+        {"surah_no": 90,  "name_arabic": "البلد",       "name_english": "Al-Balad",      "name_urdu": "البلد",       "total_verses": 20},
+        {"surah_no": 91,  "name_arabic": "الشمس",       "name_english": "Ash-Shams",     "name_urdu": "الشمس",       "total_verses": 15},
+        {"surah_no": 92,  "name_arabic": "الليل",       "name_english": "Al-Lail",       "name_urdu": "الیل",        "total_verses": 21},
+        {"surah_no": 93,  "name_arabic": "الضحى",       "name_english": "Ad-Duhaa",      "name_urdu": "الضحیٰ",      "total_verses": 11},
+        {"surah_no": 94,  "name_arabic": "الشرح",       "name_english": "Ash-Sharh",     "name_urdu": "الشرح",       "total_verses": 8},
+        {"surah_no": 95,  "name_arabic": "التين",       "name_english": "At-Tin",        "name_urdu": "التین",       "total_verses": 8},
+        {"surah_no": 96,  "name_arabic": "العلق",       "name_english": "Al-Alaq",       "name_urdu": "العلق",       "total_verses": 19},
+        {"surah_no": 97,  "name_arabic": "القدر",       "name_english": "Al-Qadr",       "name_urdu": "القدر",       "total_verses": 5},
+        {"surah_no": 98,  "name_arabic": "البينة",      "name_english": "Al-Bayyinah",   "name_urdu": "البینہ",      "total_verses": 8},
+        {"surah_no": 99,  "name_arabic": "الزلزلة",     "name_english": "Az-Zalzalah",   "name_urdu": "الزلزلہ",     "total_verses": 8},
+        {"surah_no": 100, "name_arabic": "العاديات",    "name_english": "Al-Adiyat",     "name_urdu": "العادیات",    "total_verses": 11},
+        {"surah_no": 101, "name_arabic": "القارعة",     "name_english": "Al-Qari'ah",    "name_urdu": "القارعہ",     "total_verses": 11},
+        {"surah_no": 102, "name_arabic": "التكاثر",     "name_english": "At-Takathur",   "name_urdu": "التکاثر",     "total_verses": 8},
+        {"surah_no": 103, "name_arabic": "العصر",       "name_english": "Al-Asr",        "name_urdu": "العصر",       "total_verses": 3},
+        {"surah_no": 104, "name_arabic": "الهمزة",      "name_english": "Al-Humazah",    "name_urdu": "الہمزہ",      "total_verses": 9},
+        {"surah_no": 105, "name_arabic": "الفيل",       "name_english": "Al-Feel",       "name_urdu": "الفیل",       "total_verses": 5},
+        {"surah_no": 106, "name_arabic": "قريش",        "name_english": "Quraysh",       "name_urdu": "قریش",        "total_verses": 4},
+        {"surah_no": 107, "name_arabic": "الماعون",     "name_english": "Al-Ma'un",      "name_urdu": "الماعون",     "total_verses": 7},
+        {"surah_no": 108, "name_arabic": "الكوثر",      "name_english": "Al-Kawthar",    "name_urdu": "الکوثر",      "total_verses": 3},
+        {"surah_no": 109, "name_arabic": "الكافرون",    "name_english": "Al-Kafirun",    "name_urdu": "الکافرون",    "total_verses": 6},
+        {"surah_no": 110, "name_arabic": "النصر",       "name_english": "An-Nasr",       "name_urdu": "النصر",       "total_verses": 3},
+        {"surah_no": 111, "name_arabic": "المسد",       "name_english": "Al-Masad",      "name_urdu": "المسد",       "total_verses": 5},
+        {"surah_no": 112, "name_arabic": "الإخلاص",    "name_english": "Al-Ikhlas",     "name_urdu": "الاخلاص",     "total_verses": 4},
+        {"surah_no": 113, "name_arabic": "الفلق",       "name_english": "Al-Falaq",      "name_urdu": "الفلق",       "total_verses": 5},
+        {"surah_no": 114, "name_arabic": "الناس",       "name_english": "An-Nas",        "name_urdu": "الناس",       "total_verses": 6},
     ]
     return [SurahItem(**d) for d in data]
 
@@ -118,10 +166,10 @@ def get_surah_words(surah_id: int, db: Session = Depends(get_db)):
     Kisi bhi Surah ke tamam alfaaz (Ayah number ke sath) return karta hai.
     Flutter app is se text display screen banati hai.
     """
-    if surah_id < 105 or surah_id > 114:
+    if surah_id < 57 or surah_id > 114:
         raise HTTPException(
             status_code=400,
-            detail="Sirf Surah 105-114 available hain (Proof of Concept).",
+            detail="Sirf Surah 57-114 available hain (Last 58 Surahs).",
         )
 
     words = (
@@ -156,12 +204,15 @@ def get_surah_words(surah_id: int, db: Session = Depends(get_db)):
 @app.post("/api/v1/analyze-recitation", response_model=RecitationResponse, tags=["Analysis"])
 async def analyze_recitation(
     surah_id: int = Form(...),
+    ayah_no: Optional[int] = Form(None),   # Optional: sirf ek ayah compare karna ho toh
     file: UploadFile = File(...),
     db: Session = Depends(get_db),
 ):
     """
     **Main Endpoint** — Flutter app yahan audio bhejti hai aur result wapis aata hai.
 
+    - `surah_id` (required): Surah number (57–114)
+    - `ayah_no` (optional): Agar diya toh sirf us ayah se compare hoga, warna puri surah
     - Audio file upload karo (WAV/MP3/M4A)
     - Whisper AI Arabic text transcribe karta hai
     - Word-by-word comparison hota hai
@@ -169,24 +220,31 @@ async def analyze_recitation(
     - Accuracy % milti hai
     """
     # ── Validation ──────────────────────────────────────────────────────────
-    if surah_id < 105 or surah_id > 114:
+    if surah_id < 57 or surah_id > 114:
         raise HTTPException(
             status_code=400,
-            detail="Sirf Surah 105-114 available hain.",
+            detail="Sirf Surah 57-114 available hain.",
         )
 
     # ── DB se correct words nikaalo ──────────────────────────────────────────
-    db_words = (
-        db.query(QuranWord)
-        .filter(QuranWord.surah_no == surah_id)
-        .order_by(QuranWord.ayah_no, QuranWord.word_position)
-        .all()
-    )
+    query = db.query(QuranWord).filter(QuranWord.surah_no == surah_id)
+
+    if ayah_no is not None:
+        # Sirf us specific ayah ke words — intro words (ayah 0) exclude
+        query = query.filter(QuranWord.ayah_no == ayah_no)
+    else:
+        # Puri surah — lekin intro (ayah 0) ko bhi include karo
+        pass
+
+    db_words = query.order_by(QuranWord.ayah_no, QuranWord.word_position).all()
+
     if not db_words:
-        raise HTTPException(
-            status_code=404,
-            detail=f"Surah {surah_id} database mein nahi mili.",
+        detail = (
+            f"Ayah {ayah_no} of Surah {surah_id} database mein nahi mili."
+            if ayah_no is not None
+            else f"Surah {surah_id} database mein nahi mili."
         )
+        raise HTTPException(status_code=404, detail=detail)
 
     correct_words = [w.word_arabic for w in db_words]
     correct_text = " ".join(correct_words)
@@ -223,6 +281,7 @@ async def analyze_recitation(
         return RecitationResponse(
             status="success",
             surah_id=surah_id,
+            ayah_no=ayah_no,
             accuracy=accuracy,
             transcribed_text=transcribed_text,
             original_text=correct_text,

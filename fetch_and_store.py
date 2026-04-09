@@ -12,8 +12,14 @@ bismillah_words = ["بِسْمِ", "اللَّهِ", "الرَّحْمَٰنِ",
 
 print("Starting to fetch data from Quran.com API with Ta'awwudh and Bismillah...")
 
-# Last 10 Surahs (105 to 114)
-for surah in range(105, 115):
+# Pehle existing records delete karo taake duplicates na hon
+print("Cleaning up existing records for Surahs 57-114...")
+db.query(QuranWord).filter(QuranWord.surah_no >= 57, QuranWord.surah_no <= 114).delete()
+db.commit()
+print("Cleanup done. Starting fresh fetch...")
+
+# Last 58 Surahs (57 to 114)
+for surah in range(57, 115):
     print(f"--- Processing Surah {surah} ---")
     
     # 1. Manual Insertion: A'udhu Billah aur Bismillah add karna
@@ -86,4 +92,4 @@ for surah in range(105, 115):
     time.sleep(1.5)
 
 db.close()
-print("\nCongratulations! Database with Ta'awwudh and Bismillah is ready for Surahs 105-114.")
+print("\nCongratulations! Database with Ta'awwudh and Bismillah is ready for Surahs 57-114.")

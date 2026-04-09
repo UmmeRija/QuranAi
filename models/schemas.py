@@ -14,6 +14,7 @@ class WordAnalysis(BaseModel):
 class RecitationResponse(BaseModel):
     status: str
     surah_id: int
+    ayah_no: Optional[int] = None   # None = puri surah, int = specific ayah
     accuracy: float
     transcribed_text: str
     original_text: str
