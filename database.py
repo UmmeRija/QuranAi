@@ -21,6 +21,9 @@ class QuranWord(Base):
     id            = Column(Integer, primary_key=True, index=True)
     surah_no      = Column(Integer, index=True)
     ayah_no       = Column(Integer)
+    ruku_no       = Column(Integer, index=True)   # Added for portion selection
+    page_no       = Column(Integer, index=True)   # Added for 15-line page concept
+    line_no       = Column(Integer)               # Added for precise tracking
     word_arabic   = Column(String)
     word_position = Column(Integer)
 

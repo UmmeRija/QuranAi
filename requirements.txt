@@ -5,3 +5,7 @@ openai-whisper
 python-multipart
 pydantic
 python-dotenv
+noisereduce
+pydub
+audioop-lts
+numpy
