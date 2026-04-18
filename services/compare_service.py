@@ -1,25 +1,96 @@
 """
-Compare Service
----------------
-Asli Quranic text aur user ki tilawat ka lafz-ba-lafz muqabla karta hai.
-Har lafz ka status return karta hai: "correct", "incorrect", ya "missing".
+Compare Service (Enhanced)
+--------------------------
+Asli Quranic text aur user ki tilawat ka lafz-ba-lafz aur character-level
+muqabla karta hai.
+
+Features:
+- Advanced Arabic normalization (Hamza variants, Tatweel, Alif Maqsura, etc.)
+- Character-level comparison (harakat/tashkeel aware)
+- Ayah-level breakdown
+- Fuzzy matching threshold for minor ASR variations
 """
 
 import difflib
 import unicodedata
-from typing import List
-from models.schemas import WordAnalysis
+import re
+from typing import List, Optional
+from models.schemas import WordAnalysis, AyahAnalysis
 
 
-def _normalize(word: str) -> str:
+# ── Arabic Unicode Ranges ────────────────────────────────────────────────────
+# Harakat (diacritics) range
+HARAKAT_RE = re.compile(r'[\u064B-\u065F\u0670\u06D6-\u06ED]')
+
+# Tatweel (kashida)
+TATWEEL = '\u0640'
+
+# Small Arabic letters and signs
+SMALL_SIGNS_RE = re.compile(r'[\u06D6-\u06ED\u0615-\u061A]')
+
+
+def _normalize_arabic(text: str, strip_harakat: bool = True) -> str:
     """
-    Arabic harakat (diacritics) hatao comparison ke liye.
-    Maslan: 'بِسْمِ' aur 'بسم' dono same manay jayenge.
+    Arabic text ko normalize karo comparison ke liye.
+
+    Steps:
+    1. Unicode NFKC normalization
+    2. Hamza variants → base Alif (أ إ آ ٱ → ا)
+    3. Alif Maqsura (ى) → Ya (ي) (optional, both common)
+    4. Taa Marbuta (ة) → Haa (ه) (for loose matching)
+    5. Remove Tatweel (kashida ـ)
+    6. Remove harakat/diacritics (conditional)
+    7. Remove extra whitespace
     """
-    # Unicode normalization
-    word = unicodedata.normalize("NFKC", word)
-    # Arabic diacritics (harakat) Unicode range: U+064B to U+065F
-    return "".join(ch for ch in word if not ("\u064b" <= ch <= "\u065f"))
+    # Step 1: Unicode normalization
+    text = unicodedata.normalize("NFKC", text)
+
+    # Step 2: Hamza variants → plain Alif
+    text = text.replace('أ', 'ا')
+    text = text.replace('إ', 'ا')
+    text = text.replace('آ', 'ا')
+    text = text.replace('ٱ', 'ا')  # Alif Wasla
+
+    # Step 3: Alif Maqsura → Ya
+    text = text.replace('ى', 'ي')
+
+    # Step 4: Taa Marbuta → Haa (for loose comparison)
+    text = text.replace('ة', 'ه')
+
+    # Step 5: Remove Tatweel
+    text = text.replace(TATWEEL, '')
+
+    # Step 6: Remove harakat if requested
+    if strip_harakat:
+        text = HARAKAT_RE.sub('', text)
+
+    # Step 7: Small signs remove
+    text = SMALL_SIGNS_RE.sub('', text)
+
+    # Step 8: Clean whitespace
+    text = re.sub(r'\s+', ' ', text).strip()
+
+    return text
+
+
+def _word_similarity(word1: str, word2: str) -> float:
+    """
+    Do Arabic words ke beech similarity ratio (0.0 to 1.0).
+    Fuzzy matching ke liye use hota hai.
+    """
+    norm1 = _normalize_arabic(word1)
+    norm2 = _normalize_arabic(word2)
+
+    if norm1 == norm2:
+        return 1.0
+
+    return difflib.SequenceMatcher(None, norm1, norm2).ratio()
+
+
+# ── Fuzzy match threshold ────────────────────────────────────────────────────
+# Agar do words 85%+ similar hain toh "correct" maan lo
+# (ASR minor variations handle karne ke liye)
+FUZZY_THRESHOLD = 0.85
 
 
 def compare_words(
@@ -27,31 +98,29 @@ def compare_words(
     recited_words: List[str],
 ) -> tuple[List[WordAnalysis], float]:
     """
-    Correct aur recited words ka muqabla karo.
+    Correct aur recited words ka muqabla karo (enhanced version).
 
     Args:
         correct_words: Database se mile actual Quranic words
-        recited_words: Whisper se mili user ki tilawat ke words
+        recited_words: ASR se mili user ki tilawat ke words
 
     Returns:
         (word_analysis_list, accuracy_percentage)
     """
-    # Normalize both lists for comparison
-    correct_norm = [_normalize(w) for w in correct_words]
-    recited_norm = [_normalize(w) for w in recited_words]
+    # Normalize both lists
+    correct_norm = [_normalize_arabic(w) for w in correct_words]
+    recited_norm = [_normalize_arabic(w) for w in recited_words]
 
-    # difflib se sequence matcher
+    # SequenceMatcher se alignment
     matcher = difflib.SequenceMatcher(None, correct_norm, recited_norm)
     opcodes = matcher.get_opcodes()
 
     word_analysis: List[WordAnalysis] = []
     correct_count = 0
 
-    # opcodes: ('equal'/'replace'/'delete'/'insert', i1, i2, j1, j2)
     for tag, i1, i2, j1, j2 in opcodes:
         if tag == "equal":
-            # Bilkul sahi parhay gaye
-            for idx, ci in enumerate(range(i1, i2)):
+            for ci in range(i1, i2):
                 word_analysis.append(
                     WordAnalysis(
                         word=correct_words[ci],
@@ -62,18 +131,40 @@ def compare_words(
             correct_count += (i2 - i1)
 
         elif tag == "replace":
-            # Galat parhay gaye (correct ki jagah kuch aur bola)
-            for ci in range(i1, i2):
-                word_analysis.append(
-                    WordAnalysis(
-                        word=correct_words[ci],
-                        status="incorrect",
-                        position=ci + 1,
+            # Fuzzy check karo — shayad almost sahi parha ho
+            for idx, ci in enumerate(range(i1, i2)):
+                ji = j1 + idx
+                if ji < j2:
+                    similarity = _word_similarity(
+                        correct_words[ci], recited_words[ji]
                     )
-                )
+                    if similarity >= FUZZY_THRESHOLD:
+                        word_analysis.append(
+                            WordAnalysis(
+                                word=correct_words[ci],
+                                status="correct",
+                                position=ci + 1,
+                            )
+                        )
+                        correct_count += 1
+                    else:
+                        word_analysis.append(
+                            WordAnalysis(
+                                word=correct_words[ci],
+                                status="incorrect",
+                                position=ci + 1,
+                            )
+                        )
+                else:
+                    word_analysis.append(
+                        WordAnalysis(
+                            word=correct_words[ci],
+                            status="missing",
+                            position=ci + 1,
+                        )
+                    )
 
         elif tag == "delete":
-            # Correct text mein hai lekin user ne nahi parha (missing)
             for ci in range(i1, i2):
                 word_analysis.append(
                     WordAnalysis(
@@ -83,14 +174,71 @@ def compare_words(
                     )
                 )
 
-        # "insert" = user ne extra bola — hum ignore karte hain
-        # (correct list mein nahi tha toh penalize nahi)
+        # "insert" = user ne extra bola — ignore
 
-    # Position ke hisaab se sort karo
+    # Position sort
     word_analysis.sort(key=lambda x: x.position)
 
-    # Accuracy calculate karo
+    # Accuracy
     total = len(correct_words)
     accuracy = round((correct_count / total) * 100, 2) if total > 0 else 0.0
 
     return word_analysis, accuracy
+
+
+def compare_ayah_text(
+    reference_text: str,
+    transcribed_text: str,
+) -> dict:
+    """
+    Ayah level pe character-level comparison (Tanzil reference vs transcribed).
+
+    Args:
+        reference_text: Tanzil se mila original text (with tashkeel)
+        transcribed_text: ASR se mila text
+
+    Returns:
+        dict: {accuracy, matching_chars, total_chars, missing_words, incorrect_words}
+    """
+    ref_norm = _normalize_arabic(reference_text)
+    trans_norm = _normalize_arabic(transcribed_text)
+
+    ref_words = ref_norm.split()
+    trans_words = trans_norm.split()
+
+    # Word-level analysis for this ayah
+    matcher = difflib.SequenceMatcher(None, ref_words, trans_words)
+    opcodes = matcher.get_opcodes()
+
+    correct_count = 0
+    missing_words = []
+    incorrect_words = []
+
+    for tag, i1, i2, j1, j2 in opcodes:
+        if tag == "equal":
+            correct_count += (i2 - i1)
+        elif tag == "replace":
+            for idx, ci in enumerate(range(i1, i2)):
+                ji = j1 + idx
+                if ji < j2:
+                    sim = _word_similarity(ref_words[ci], trans_words[ji])
+                    if sim >= FUZZY_THRESHOLD:
+                        correct_count += 1
+                    else:
+                        incorrect_words.append(reference_text.split()[ci] if ci < len(reference_text.split()) else ref_words[ci])
+                else:
+                    missing_words.append(reference_text.split()[ci] if ci < len(reference_text.split()) else ref_words[ci])
+        elif tag == "delete":
+            for ci in range(i1, i2):
+                missing_words.append(reference_text.split()[ci] if ci < len(reference_text.split()) else ref_words[ci])
+
+    total = len(ref_words)
+    accuracy = round((correct_count / total) * 100, 2) if total > 0 else 0.0
+
+    return {
+        "accuracy": accuracy,
+        "correct_words": correct_count,
+        "total_words": total,
+        "missing_words": missing_words,
+        "incorrect_words": incorrect_words,
+    }

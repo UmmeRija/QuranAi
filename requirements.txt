@@ -1,7 +1,12 @@
 fastapi
 uvicorn[standard]
 sqlalchemy
-openai-whisper
+transformers
+torch
+librosa
+fastdtw
+scikit-learn
+scipy
 python-multipart
 pydantic
 python-dotenv
@@ -9,3 +14,5 @@ noisereduce
 pydub
 audioop-lts
 numpy
+watchfiles
+requests

@@ -7,7 +7,13 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./quran.db")
+DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./data/quran.db")
+
+if DATABASE_URL.startswith("sqlite:///"):
+    db_file = DATABASE_URL[len("sqlite:///"):]
+    db_dir = os.path.dirname(db_file)
+    if db_dir:
+        os.makedirs(db_dir, exist_ok=True)
 
 engine = create_engine(DATABASE_URL, connect_args={"check_same_thread": False})
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
@@ -51,5 +57,17 @@ class UserSession(Base):
     timestamp      = Column(DateTime, default=datetime.utcnow)
 
 
-# Create all tables on startup
-Base.metadata.create_all(bind=engine)
+class TanzilText(Base):
+    """Tanzil.net se download kiya gaya Uthmani Quran text (with full tashkeel)."""
+    __tablename__ = "tanzil_text"
+
+    id       = Column(Integer, primary_key=True, index=True)
+    surah_no = Column(Integer, index=True)
+    ayah_no  = Column(Integer)
+    text     = Column(String)  # Full ayah text with tashkeel/harakat
+
+
+def init_db():
+    """Database tables create karta hai agar na bani hon."""
+    print("[Database] Initializing tables...")
+    Base.metadata.create_all(bind=engine)

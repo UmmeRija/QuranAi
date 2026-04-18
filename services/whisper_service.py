@@ -45,17 +45,16 @@ def clean_audio(file_path: str) -> str:
         samples = np.array(audio.get_array_of_samples())
         
         # 3. Reduce noise (stationary noise removal)
-        # prop_decrease=0.85 is slightly more aggressive for echoic environments
-        reduced_noise = nr.reduce_noise(y=samples, sr=audio.frame_rate, prop_decrease=0.85)
+        # Lower prop_decrease (0.60) to avoid removing actual voice signal
+        reduced_noise = nr.reduce_noise(y=samples, sr=audio.frame_rate, prop_decrease=0.60)
         
         # 4. Convert back to AudioSegment
         cleaned_audio = audio._spawn(reduced_noise.astype(np.int16))
         
-        # 5. Apply filters for better clarity
-        cleaned_audio = cleaned_audio.high_pass_filter(150) # Remove low hum/rumble
-        cleaned_audio = cleaned_audio.low_pass_filter(6000)  # Remove high-frequency hiss
+        # 5. Apply minimal filters to keep the voice natural
+        cleaned_audio = cleaned_audio.high_pass_filter(80) # Remove only very low rumble
         
-        # 6. Smooth out volume variations (helps with echo tails)
+        # 6. Normalize to ensure consistent volume without clipping
         cleaned_audio = cleaned_audio.normalize()
         
         # 7. Save to temp file
@@ -89,8 +88,9 @@ def transcribe_audio(file_path: str, initial_prompt: str = None) -> str:
         language="ar",           # Arabic force karo
         task="transcribe",
         fp16=False,               # CPU-safe mode
-        temperature=0,            # Deterministic output
-        initial_prompt=initial_prompt, # Prompt guide
+        temperature=0.5,          # High creativity for regional accents
+        initial_prompt=initial_prompt, # Context guide
+        no_speech_threshold=0.4,  # Lower threshold for quiet/normal people
     )
     
     # Cleaned file delete karo kaam khatam hone par

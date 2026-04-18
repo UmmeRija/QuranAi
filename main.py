@@ -1,7 +1,11 @@
 """
-QiraatAI — FastAPI Backend
---------------------------
-Main API server for Quran recitation analysis.
+QiraatAI — FastAPI Backend (v2.0)
+----------------------------------
+Quran recitation analysis powered by:
+- Tarteel AI (Quran-specialized ASR)
+- Tanzil.net (Authoritative reference text)
+- EveryAyah.com (Reference audio for pronunciation scoring)
+
 Flutter app yahan se connect karta hai.
 """
 
@@ -14,7 +18,7 @@ import uuid
 from datetime import datetime
 from dotenv import load_dotenv
 
-from database import SessionLocal, QuranWord, SurahInfo, UserSession
+from database import SessionLocal, QuranWord, SurahInfo, UserSession, TanzilText, init_db
 from models.schemas import (
     RecitationResponse,
     SurahItem,
@@ -22,17 +26,20 @@ from models.schemas import (
     SessionCreate,
     SessionRead,
     WordAnalysis,
+    AyahAnalysis,
 )
-from services.whisper_service import transcribe_audio, get_model
-from services.compare_service import compare_words
+from services.asr_service import transcribe_audio, get_model
+from services.compare_service import compare_words, compare_ayah_text
+from services.tanzil_service import store_tanzil_in_db, get_surah_text
+from services.audio_reference_service import compute_pronunciation_score
 
 load_dotenv()
 
 # ── App Setup ────────────────────────────────────────────────────────────────
 app = FastAPI(
     title="QiraatAI API",
-    description="Quran Recitation Analysis API powered by OpenAI Whisper",
-    version="1.0.0",
+    description="Quran Recitation Analysis — Tarteel AI + Tanzil + EveryAyah",
+    version="2.0.0",
 )
 
 # CORS — Flutter app ko connect karne ke liye
@@ -44,16 +51,30 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# ── Startup: Whisper model pehle se load kar lo ───────────────────────────────
+# ── Startup ───────────────────────────────────────────────────────────────────
 @app.on_event("startup")
 async def startup_event():
-    print("=" * 50)
-    print("  QiraatAI Backend Starting...")
-    print("=" * 50)
-    get_model()  # Singleton — sirf ek baar load hoga
+    print("=" * 60)
+    print("  QiraatAI Backend v2.0 Starting...")
+    print("  [Tarteel AI ASR + Tanzil + EveryAyah]")
+    print("=" * 60)
+
+    # 1. Database tables
+    init_db()
+
+    # 2. Tanzil reference text download + store
+    try:
+        store_tanzil_in_db()
+        print("[Startup] Tanzil reference text ready.")
+    except Exception as e:
+        print(f"[Startup] Tanzil setup warning: {e}")
+
+    # 3. ASR model load (singleton)
+    get_model()
+
     print("[Server] Ready to receive recitations!")
     print("  Docs: http://localhost:8000/docs")
-    print("=" * 50)
+    print("=" * 60)
 
 
 # ── DB Dependency ─────────────────────────────────────────────────────────────
@@ -74,7 +95,8 @@ def get_db():
 def home():
     return {
         "app": "QiraatAI",
-        "version": "1.0.0",
+        "version": "2.0.0",
+        "engine": "Tarteel AI (whisper-base-ar-quran)",
         "status": "running",
         "docs": "/docs",
     }
@@ -143,6 +165,7 @@ async def analyze_recitation(
     ayah_no: Optional[int] = Form(None),    # Backward compatibility
     start_ayah: Optional[int] = Form(None), # Range start
     end_ayah: Optional[int] = Form(None),   # Range end
+    include_pronunciation: Optional[bool] = Form(False),  # MFCC/DTW scoring
     file: UploadFile = File(...),
     db: Session = Depends(get_db),
 ):
@@ -151,24 +174,23 @@ async def analyze_recitation(
     **Main Endpoint** — Flutter app yahan audio bhejti hai aur result wapis aata hai.
 
     - `surah_id` (required): Surah number (1–114)
-    - `ayah_no` (optional): Agar diya toh sirf us ayah se compare hoga, warna puri surah
+    - `ayah_no` (optional): Single ayah select karo
+    - `start_ayah` / `end_ayah` (optional): Ayah range
+    - `include_pronunciation` (optional): MFCC/DTW pronunciation scoring ON/OFF
     - Audio file upload karo (WAV/MP3/M4A)
-    - Whisper AI Arabic text transcribe karta hai
-    - Word-by-word comparison hota hai
-    - Har lafz ka correct/incorrect status milta hai
-    - Accuracy % milti hai
+    - **Tarteel AI** Arabic text transcribe karta hai (Quran-specialized)
+    - Word-by-word + Ayah-level comparison hota hai
+    - Pronunciation scoring (optional) — EveryAyah reference audio se
     """
     # ── Validation ──────────────────────────────────────────────────────────
     if surah_id < 1 or surah_id > 114:
         raise HTTPException(status_code=400, detail="Sirf Surah 1-114 available hain.")
 
     # ── Param Mapping ───────────────────────────────────────────────────────
-    # Agar sirf ayah_no diya ho, toh usay start aur end dono maan lo
     if ayah_no is not None and start_ayah is None:
         start_ayah = ayah_no
         end_ayah = ayah_no
     
-    # Range logic: Agar start hai par end nahi, toh end = start
     if start_ayah is not None and end_ayah is None:
         end_ayah = start_ayah
 
@@ -176,11 +198,7 @@ async def analyze_recitation(
     query = db.query(QuranWord).filter(QuranWord.surah_no == surah_id)
 
     if start_ayah is not None and end_ayah is not None:
-        # Range selection
         query = query.filter(QuranWord.ayah_no >= start_ayah, QuranWord.ayah_no <= end_ayah)
-    else:
-        # Puri surah
-        pass
 
     db_words = query.order_by(QuranWord.ayah_no, QuranWord.word_position).all()
 
@@ -198,18 +216,54 @@ async def analyze_recitation(
         with open(temp_filename, "wb") as buffer:
             buffer.write(await file.read())
 
-        # ── Whisper Transcription ────────────────────────────────────────────
-        print(f"[Whisper] Transcribing Surah {surah_id}...")
-        # Using truncated prompt for noise robustness
-        prompt_text = " ".join(correct_words[:100])
-        transcribed_text = transcribe_audio(temp_filename, initial_prompt=prompt_text)
-        print(f"[Whisper] Result: {transcribed_text[:80]}...")
+        # ── Step 1: Tarteel AI Transcription ─────────────────────────────────
+        print(f"[Tarteel] Transcribing Surah {surah_id}...")
+        transcribed_text = transcribe_audio(temp_filename)
+        print(f"[Tarteel] Result: {transcribed_text[:80]}...")
 
         user_words = transcribed_text.split()
 
-        # ── Word-by-Word Comparison ──────────────────────────────────────────
+        # ── Step 2: Word-by-Word Comparison ──────────────────────────────────
         word_analysis, accuracy = compare_words(correct_words, user_words)
-        print(f"[Compare] Accuracy: {accuracy}%")
+        print(f"[Compare] Word accuracy: {accuracy}%")
+
+        # ── Step 3: Ayah-level Analysis (Tanzil reference) ───────────────────
+        ayah_analysis_list = []
+        tanzil_texts = get_surah_text(surah_id, start_ayah, end_ayah, db)
+
+        if tanzil_texts:
+            for ayah_num, ref_text in tanzil_texts.items():
+                ayah_result = compare_ayah_text(ref_text, transcribed_text)
+                
+                ayah_pron_score = None
+                # Step 4: Optional pronunciation scoring per-ayah
+                if include_pronunciation:
+                    try:
+                        pron_result = compute_pronunciation_score(
+                            temp_filename, surah_id, ayah_num
+                        )
+                        ayah_pron_score = pron_result.get("score")
+                    except Exception as e:
+                        print(f"[Pronunciation] Error for {surah_id}:{ayah_num}: {e}")
+
+                ayah_analysis_list.append(AyahAnalysis(
+                    ayah_no=ayah_num,
+                    text_accuracy=ayah_result["accuracy"],
+                    pronunciation_score=ayah_pron_score,
+                    missing_words=ayah_result["missing_words"],
+                    incorrect_words=ayah_result["incorrect_words"],
+                ))
+
+        # ── Step 5: Overall pronunciation score ─────────────────────────────
+        overall_pron_score = None
+        if include_pronunciation and start_ayah is not None:
+            try:
+                pron = compute_pronunciation_score(
+                    temp_filename, surah_id, start_ayah
+                )
+                overall_pron_score = pron.get("score")
+            except Exception as e:
+                print(f"[Pronunciation] Overall error: {e}")
 
         # ── Session History Save karo ────────────────────────────────────────
         session = UserSession(
@@ -230,14 +284,17 @@ async def analyze_recitation(
             transcribed_text=transcribed_text,
             original_text=correct_text,
             word_analysis=word_analysis,
+            pronunciation_score=overall_pron_score,
+            ayah_analysis=ayah_analysis_list if ayah_analysis_list else None,
         )
 
+    except HTTPException:
+        raise
     except Exception as e:
         print(f"[Error] analyze-recitation: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
     finally:
-        # Temp file delete karo
         if os.path.exists(temp_filename):
             os.remove(temp_filename)
 

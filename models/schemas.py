@@ -10,6 +10,15 @@ class WordAnalysis(BaseModel):
     position: int
 
 
+# ── Ayah-level analysis (NEW — Tanzil comparison) ────────────────────────────
+class AyahAnalysis(BaseModel):
+    ayah_no: int
+    text_accuracy: float
+    pronunciation_score: Optional[float] = None
+    missing_words: List[str] = []
+    incorrect_words: List[str] = []
+
+
 # ── Full recitation analysis response ────────────────────────────────────────
 class RecitationResponse(BaseModel):
     status: str
@@ -20,6 +29,9 @@ class RecitationResponse(BaseModel):
     transcribed_text: str
     original_text: str
     word_analysis: List[WordAnalysis]
+    # New fields for enhanced analysis
+    pronunciation_score: Optional[float] = None      # 0-100 from MFCC/DTW
+    ayah_analysis: Optional[List[AyahAnalysis]] = None  # Per-ayah breakdown
 
 
 # ── Surah list item ───────────────────────────────────────────────────────────
