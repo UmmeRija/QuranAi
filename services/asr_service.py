@@ -1,124 +1,105 @@
-"""
-ASR Service (Quran-Specialized)
---------------------------------
-Tarteel AI ka whisper-base-ar-quran model use karta hai.
-"""
-
 import os
+import re
 import numpy as np
-import torch
-import librosa
-from pydub import AudioSegment
-import noisereduce as nr
 from dotenv import load_dotenv
 
 load_dotenv()
 
-_processor = None
 _model = None
-_device = None
+
+MODEL_SIZE = os.getenv("ASR_MODEL_SIZE", "medium")
+SAMPLE_RATE = 16000
 
 
-def get_model():
-    global _processor, _model, _device
-
+def _load_model():
+    global _model
     if _model is None:
-        from transformers import AutoProcessor, AutoModelForSpeechSeq2Seq
-
-        model_id = os.getenv("ASR_MODEL", "tarteel-ai/whisper-base-ar-quran")
-        print(f"[ASR] Loading Tarteel model '{model_id}' — please wait...")
-
-        _processor = AutoProcessor.from_pretrained(model_id)
-        _model = AutoModelForSpeechSeq2Seq.from_pretrained(model_id)
-
-        # Fix outdated generation config
-        _model.generation_config.forced_decoder_ids = None
-        _model.generation_config.suppress_tokens = []
-
-        _device = "cuda" if torch.cuda.is_available() else "cpu"
-        _model.to(_device)
-
-        print(f"[ASR] Model loaded on '{_device}' successfully!")
-
-    return _processor, _model, _device
-
-
-def clean_audio(file_path: str) -> str:
-    try:
-        print(f"[Audio] Cleaning: {file_path}")
-        audio = AudioSegment.from_file(file_path)
-        audio = audio.set_frame_rate(16000).set_channels(1)
-        samples = np.array(audio.get_array_of_samples())
-
-        reduced_noise = nr.reduce_noise(
-            y=samples.astype(np.float32),
-            sr=16000,
-            prop_decrease=0.60
+        from faster_whisper import WhisperModel
+        print(f"[ASR] Loading faster-whisper '{MODEL_SIZE}' on CPU with INT8...")
+        _model = WhisperModel(
+            MODEL_SIZE,
+            device="cpu",
+            compute_type="int8",        #  INT8 quantization for CPU speedup
         )
+        print("[ASR] Model ready.")
+    return _model
 
-        cleaned_audio = audio._spawn(reduced_noise.astype(np.int16))
-        cleaned_audio = cleaned_audio.high_pass_filter(80)
-        cleaned_audio = cleaned_audio.normalize()
 
-        base, ext = os.path.splitext(file_path)
-        cleaned_file_path = f"{base}_cleaned.wav"
-        cleaned_audio.export(cleaned_file_path, format="wav")
+def get_pipeline():
+    return _load_model()
 
-        return cleaned_file_path
+
+def clean_audio(file_path: str) -> np.ndarray:
+    """Load and validate audio file."""
+    try:
+        import librosa
+        print(f"[Audio] Loading: {file_path}")
+        audio, sr = librosa.load(file_path, sr=SAMPLE_RATE, mono=True)
+        duration = len(audio) / SAMPLE_RATE
+        print(f"[Audio] Loaded: {duration:.1f}s, {len(audio)} samples")
+        return audio
     except Exception as e:
-        print(f"[Audio] Cleaning error: {e}")
-        return file_path
+        print(f"[Audio] Load error: {e}")
+        return None
+
+
+def _clean_text(text: str) -> str:
+    """Remove special Whisper tokens and extra whitespace."""
+    # Remove any <|token|> style special tokens
+    text = re.sub(r'<\|[^|]+\|>', '', text)
+    # Collapse multiple spaces
+    text = re.sub(r'\s+', ' ', text)
+    return text.strip()
 
 
 def transcribe_audio(file_path: str, initial_prompt: str = None) -> str:
-    # Step 1: Clean audio
-    cleaned_path = clean_audio(file_path)
+    model = _load_model()
 
-    # Step 2: Load audio
+    # Quick audio validation
+    audio = clean_audio(file_path)
+    if audio is None or len(audio) == 0:
+        print("[ASR] ERROR: Could not load audio.")
+        return ""
+
+    duration = len(audio) / SAMPLE_RATE
+    print(f"[ASR] Transcribing {duration:.1f}s of audio...")
+
     try:
-        audio_array, sr = librosa.load(cleaned_path, sr=16000, mono=True)
-    except Exception as e:
-        print(f"[ASR] Librosa load error: {e}")
-        temp_wav = cleaned_path.replace(".wav", "_conv.wav")
-        audio_seg = AudioSegment.from_file(cleaned_path)
-        audio_seg = audio_seg.set_frame_rate(16000).set_channels(1)
-        audio_seg.export(temp_wav, format="wav")
-        audio_array, sr = librosa.load(temp_wav, sr=16000, mono=True)
-        if os.path.exists(temp_wav):
-            os.remove(temp_wav)
-
-    # Step 3: Get model
-    processor, model, device = get_model()
-
-    # Step 4: Process audio
-    inputs = processor(
-        audio_array,
-        sampling_rate=16000,
-        return_tensors="pt"
-    ).to(device)
-
-    # Step 5: Generate — forced_decoder_ids manually set karo
-    with torch.no_grad():
-        forced_decoder_ids = processor.get_decoder_prompt_ids(
+        # ✅ faster-whisper handles chunking internally — no manual loop needed
+        segments, info = model.transcribe(
+            file_path,
             language="ar",
-            task="transcribe"
+            task="transcribe",
+            beam_size=1,
+            best_of=1,
+            temperature=0.0,
+            condition_on_previous_text=True,
+            vad_filter=False,
+            word_timestamps=False,
         )
-        predicted_ids = model.generate(
-            inputs["input_features"],
-            forced_decoder_ids=forced_decoder_ids,
-            max_new_tokens=200,
-        )
 
-    # Step 6: Decode
-    transcription = processor.batch_decode(
-        predicted_ids,
-        skip_special_tokens=True
-    )
+        print(f"[ASR] Detected language: {info.language} "
+              f"(probability: {info.language_probability:.2f})")
 
-    # Cleanup
-    if cleaned_path != file_path and os.path.exists(cleaned_path):
-        os.remove(cleaned_path)
+        # ✅ Collect all segments (generator — must iterate)
+        results = []
+        for segment in segments:
+            text = _clean_text(segment.text)
+            if text:
+                print(f"[ASR] Segment [{segment.start:.1f}s → {segment.end:.1f}s]: "
+                      f"'{text}'")
+                results.append(text)
 
-    result = transcription[0].strip() if transcription else ""
-    print(f"[ASR] Transcribed: {result[:80]}...")
-    return result
+        full_text = " ".join(results)
+        print(f"[ASR] Done. Total: {len(full_text)} chars across {len(results)} segments.")
+
+        if not full_text:
+            print("[ASR] WARNING: Empty transcription!")
+
+        return full_text
+
+    except Exception as e:
+        print(f"[ASR] ERROR: {e}")
+        import traceback
+        traceback.print_exc()
+        return ""

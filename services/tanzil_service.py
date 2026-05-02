@@ -15,13 +15,13 @@ from sqlalchemy.orm import Session
 from database import SessionLocal, TanzilText
 
 
-# Tanzil download URL — Uthmani text with full tashkeel
+# Tanzil download URL — IndoPak script (Authentic for our region)
 TANZIL_DOWNLOAD_URL = (
- "https://api.alquran.cloud/v1/quran/quran-uthmani"
+ "https://api.alquran.cloud/v1/quran/quran-indopak"
 )
 
 # Local cache path
-TANZIL_CACHE_FILE = os.path.join("data", "tanzil_uthmani.txt")
+TANZIL_CACHE_FILE = os.path.join("data", "tanzil_indopak.txt")
 
 
 def download_tanzil_text() -> str:

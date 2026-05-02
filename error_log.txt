@@ -1,0 +1,7 @@
+Traceback (most recent call last):
+  File "C:\Users\3S\OneDrive\Desktop\python+flutter\python\main.py", line 233, in analyze_recitation
+    transcribed_text = transcribe_audio(temp_filename, initial_prompt=initial_prompt)
+  File "C:\Users\3S\OneDrive\Desktop\python+flutter\python\services\asr_service.py", line 121, in transcribe_audio
+    total_prompt_tokens = 4 + (prompt_ids.shape[1] if prompt_ids is not None else 0)
+                               ~~~~~~~~~~~~~~~~^^^
+IndexError: tuple index out of range

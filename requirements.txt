@@ -4,6 +4,7 @@ sqlalchemy
 transformers
 torch
 librosa
+soundfile
 fastdtw
 scikit-learn
 scipy
@@ -16,3 +17,4 @@ audioop-lts
 numpy
 watchfiles
 requests
+faster-whisper

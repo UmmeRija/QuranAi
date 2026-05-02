@@ -5,8 +5,9 @@ from datetime import datetime
 
 # ── Word-level analysis ──────────────────────────────────────────────────────
 class WordAnalysis(BaseModel):
-    word: str
-    status: str        # "correct" | "incorrect" | "missing"
+    correct_word: str  # Original word from Quran
+    user_word: Optional[str] = None # What the user said
+    status: str        # "match" | "incorrect" | "missing" | "extra"
     position: int
 
 
@@ -68,9 +69,11 @@ class SessionCreate(BaseModel):
 class SessionRead(BaseModel):
     id: int
     surah_id: int
+    surah_name: Optional[str] = "Surah"
     accuracy_score: float
     recited_text: str
     timestamp: datetime
+
 
     class Config:
         from_attributes = True

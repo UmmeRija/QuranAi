@@ -1,126 +1,107 @@
 import requests
 import time
-from database import SessionLocal, Base, engine, QuranWord, SurahInfo
+import os
+from database import SessionLocal, Base, engine, QuranWord, SurahInfo, TanzilText
+from services.tanzil_service import store_tanzil_in_db, get_surah_text
 
-# Database tables create karna
+# Database setup
 Base.metadata.create_all(bind=engine)
 db = SessionLocal()
 
-# Ta'awwudh aur Tasmiyah ke lafz (Uthmani Script)
+# Ta'awwudh aur Tasmiyah ke lafz (IndoPak Style matching text)
+# Note: In IndoPak script, spelling might be slightly different.
+# We'll stick to a verified standard for these as well.
 audhu_words = ["أَعُوذُ", "بِاللَّهِ", "مِنَ", "الشَّيْطَانِ", "الرَّجِيمِ"]
 bismillah_words = ["بِسْمِ", "اللَّهِ", "الرَّحْمَٰنِ", "الرَّحِيمِ"]
 
-print("Starting to fetch data from Quran.com API with Ta'awwudh and Bismillah...")
+print("="*60)
+print("  Quran Database Population — Authentic Tanzil IndoPak Edition")
+print("="*60)
 
-print("Cleaning up existing records for all Surahs (1-114)...")
-db.query(QuranWord).delete()
-db.query(SurahInfo).delete()
-db.commit()
-print("Cleanup done. Starting full Quran fetch...")
+# ── Step 1: Initialize Tanzil Reference Text ────────────────────────────────
+print("\n[Step 1] Initializing Tanzil IndoPak reference text...")
+try:
+    # Ensure current Tanzil data is clean for the new script
+    db.query(TanzilText).delete()
+    db.commit()
+    store_tanzil_in_db(db)
+    print("  Tanzil IndoPak text ready.")
+except Exception as e:
+    print(f"  Error initializing Tanzil: {e}")
 
-# ── Step 1: Fetch Surah Info (Metadata) ──────────────────────────────────────
-print("Fetching Surah Metadata (Names and Verse counts)...")
+# ── Step 2: Fetch Surah Metadata ──────────────────────────────────────────
+print("\n[Step 2] Fetching Surah Metadata...")
 chapters_url = "https://api.quran.com/api/v4/chapters?language=en"
-headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'}
-
+headers = {'User-Agent': 'Mozilla/5.0'}
 try:
     resp = requests.get(chapters_url, headers=headers)
     if resp.status_code == 200:
         chapters = resp.json().get("chapters", [])
         for ch in chapters:
             surah_no = ch["id"]
-            # Urdu names are not easily available in one call, so we'll use a simple fallback
-            # or you can add another call for urdu language.
-            new_surah = SurahInfo(
-                surah_no=surah_no,
-                name_arabic=ch["name_arabic"],
-                name_english=ch["translated_name"]["name"],
-                name_urdu=ch["name_simple"], # Fallback for now
-                total_verses=ch["verses_count"]
-            )
-            db.add(new_surah)
-        db.commit()
-        print(f"Successfully saved info for {len(chapters)} Surahs.")
-except Exception as e:
-    print(f"Error fetching metadata: {e}")
-
-# ── Step 2: Fetch Word-by-Word Data ──────────────────────────────────────────
-# Last 114 Surahs (1 to 114)
-for surah in range(1, 115):
-    print(f"--- Processing Surah {surah} ---")
-    
-    # 1. Manual Insertion: A'udhu Billah aur Bismillah add karna
-    current_pos = 1
-    
-    # A'udhu Billah add ho raha hai
-    for word in audhu_words:
-        db.add(QuranWord(
-            surah_no=surah,
-            ayah_no=0, # Intro words ke liye Ayah 0 rakha hai
-            word_arabic=word,
-            word_position=current_pos
-        ))
-        current_pos += 1
-        
-    # Bismillah add ho rahi hai
-    for word in bismillah_words:
-        db.add(QuranWord(
-            surah_no=surah,
-            ayah_no=0,
-            word_arabic=word,
-            word_position=current_pos
-        ))
-        current_pos += 1
-    
-    # 2. API Fetching: Surah ki Ayaat nikalna
-    url = f"https://api.quran.com/api/v4/verses/by_chapter/{surah}?words=true&word_fields=text_uthmani"
-    headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'}
-    
-    max_retries = 3
-    for attempt in range(max_retries):
-        try:
-            response = requests.get(url, headers=headers, timeout=10)
-            
-            if response.status_code == 200:
-                data = response.json()
-                verses = data.get("verses", [])
-                
-                for verse in verses:
-                    ayah_no = verse["verse_number"]
-                    ruku_no = verse.get("ruku_number") or 0
-                    words = verse.get("words", [])
-                    
-                    for word in words:
-                        if word.get("char_type_name") == "word":
-                            # API se lafz nikal kar DB mein daalna
-                            new_word = QuranWord(
-                                surah_no=surah,
-                                ayah_no=ayah_no,
-                                ruku_no=ruku_no,
-                                page_no=word.get("page_number"),
-                                line_no=word.get("line_number"),
-                                word_arabic=word.get("text_uthmani") or word.get("text"),
-                                word_position=word.get("position")
-                            )
-                            db.add(new_word)
-                
-                db.commit() # Surah ka sara data save ho gaya
-                print(f"Surah {surah} (including Intro) successfully saved!")
-                break 
-                
+            existing = db.query(SurahInfo).filter(SurahInfo.surah_no == surah_no).first()
+            if not existing:
+                db.add(SurahInfo(
+                    surah_no=surah_no,
+                    name_arabic=ch["name_arabic"],
+                    name_english=ch["name_simple"],
+                    name_urdu=ch["name_simple"],
+                    total_verses=ch["verses_count"]
+                ))
             else:
-                print(f"Failed to fetch Surah {surah}. Status Code: {response.status_code}")
-                break
-                
-        except requests.exceptions.ConnectionError:
-            print(f"Connection lost on Surah {surah}. Retrying... ({attempt + 1}/{max_retries})")
-            time.sleep(3)
-        except Exception as e:
-            print(f"An unexpected error occurred: {e}")
-            break
-            
-    # API server par bojh na dalne ke liye chota sa pause
-    time.sleep(1.5)
+                existing.total_verses = ch["verses_count"]
+        db.commit()
+        print(f"  Metadata for {len(chapters)} Surahs ready.")
+except Exception as e:
+    print(f"  Metadata error: {e}")
+
+# ── Step 3: Populate Words directly from Tanzil IndoPak ───────────────────
+print("\n[Step 3] Populating Word-by-Word data from Tanzil (Authentic)...")
+
+# Optional: Cleanup whole table for fresh start if needed
+# db.query(QuranWord).delete()
+# db.commit()
+
+for surah_no in range(1, 115):
+    # Fetch Tanzil ayahs for this surah
+    ayah_texts = get_surah_text(surah_no, db=db)
+    if not ayah_texts:
+        print(f"  Skipping Surah {surah_no}: No Tanzil text found.")
+        continue
+    
+    # Cleanup only this surah
+    db.query(QuranWord).filter(QuranWord.surah_no == surah_no).delete()
+    db.commit()
+
+    # 1. Intro Words (Ayah 0)
+    current_pos = 1
+    # Adding Ta'awwudh
+    for w in audhu_words:
+        db.add(QuranWord(surah_no=surah_no, ayah_no=0, word_arabic=w, word_position=current_pos))
+        current_pos += 1
+    # Adding Bismillah (Except for Surah 9, though usually people say it anyway, 
+    # but for Tanzil consistency we keep Intro logic same)
+    for w in bismillah_words:
+        db.add(QuranWord(surah_no=surah_no, ayah_no=0, word_arabic=w, word_position=current_pos))
+        current_pos += 1
+
+    # 2. Main Ayahs from Tanzil
+    for ayah_no, text in ayah_texts.items():
+        # Split Ayah text into words accurately
+        # Note: Arabic splitting can be tricky with specific hamzas, but simple split works for most scripts
+        words = text.split()
+        for idx, w in enumerate(words):
+            db.add(QuranWord(
+                surah_no=surah_no,
+                ayah_no=ayah_no,
+                word_arabic=w,
+                word_position=idx + 1
+            ))
+    
+    db.commit()
+    print(f"  Surah {surah_no:3} | {len(ayah_texts):3} Ayahs | Done")
 
 db.close()
-print("\nCongratulations! Database with Ta'awwudh and Bismillah is ready for Surahs 57-114.")
+print("\n" + "="*60)
+print("  SUCCESS: Full Quran populated with Authentic IndoPak text.")
+print("="*60)
